@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pond Overlay</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Georgia,serif;background:#f3efe2;color:#2b2b2b}
+.wrap{max-width:640px;margin:0 auto;padding:16px}
+h1{font-size:1.5rem;margin:0 0 4px}
+h2{font-size:1.1rem;margin:16px 0 4px}
+p{margin:4px 0 12px}
+#banner{padding:8px;border-radius:6px;font-family:monospace;font-size:.85rem;margin-bottom:12px;overflow-wrap:anywhere}
+.pass{background:#cfe8c8}.fail{background:#f2c4c4}
+#stage{position:relative;width:100%;aspect-ratio:4/3;background:#fff;border:2px solid #2b2b2b;border-radius:6px;overflow:hidden}
+#stage img{position:absolute;inset:0;width:100%;height:100%;display:block}
+#mapB{opacity:.5}
+.row{display:flex;gap:10px;align-items:center;margin:12px 0;flex-wrap:wrap}
+.row input[type=range]{flex:1;min-width:140px;min-height:36px}
+button{min-height:44px;padding:0 14px;font:inherit;border:2px solid #2b2b2b;border-radius:6px;background:#e8dca8}
+button:active{background:#cdbd78}
+.key{display:flex;gap:16px;font-size:.9rem}
+.key span::before{content:"";display:inline-block;width:12px;height:12px;margin-right:6px;border-radius:50%}
+.k1::before{background:#2a6fb0}.k2::before{background:#d6472b}
+#scale{border:2px solid #2b2b2b;border-radius:6px;padding:8px 12px;margin-top:16px;background:#fbf8ec}
+.grid{display:grid;grid-template-columns:1fr;gap:6px}
+@media(min-width:480px){.grid{grid-template-columns:1fr 1fr}}
+.grid label{display:block;font-size:.85rem;min-width:0;overflow-wrap:anywhere}
+.grid input{width:100%;min-height:40px;font:inherit;padding:4px}
+#result{font-family:monospace;font-size:.9rem;margin-top:8px;overflow-wrap:anywhere}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Pond Overlay</h1>
+<p>Two drawn maps of the town pond, stacked. Slide to see where the lines moved.</p>
+<div id="banner">checking...</div>
+<div id="stage"><img id="mapA" alt="Older pond map (placeholder)"><img id="mapB" alt="Newer pond map (placeholder)"></div>
+<div class="row">
+<label for="op">Newer map</label>
+<input id="op" type="range" min="0" max="100" value="50">
+<output id="val">50%</output>
+</div>
+<div class="row"><button id="b0">Old only</button><button id="b50">Half</button><button id="b100">New only</button></div>
+<div class="key"><span class="k1">older map</span><span class="k2">newer map</span></div>
+
+<div id="scale">
+<h2>Scale check</h2>
+<p>Measure each map's scale bar and the north bank (distance from the bridge) in pixels.</p>
+<div class="grid">
+<label>Older bar (px)<input id="aPx" type="number" min="0" step="any" value="100"></label>
+<label>Older bar (metres)<input id="aM" type="number" min="0" step="any" value="10"></label>
+<label>Older north bank (px)<input id="aBank" type="number" min="0" step="any" value="200"></label>
+<label>Newer bar (px)<input id="bPx" type="number" min="0" step="any" value="100"></label>
+<label>Newer bar (metres)<input id="bM" type="number" min="0" step="any" value="10"></label>
+<label>Newer north bank (px)<input id="bBank" type="number" min="0" step="any" value="210"></label>
+</div>
+<div id="result"></div>
+</div>
+</div>
+<script>
+function opacityFromSlider(v){
+  var n=Number(v);
+  if(!isFinite(n))return 0.5;
+  if(n<0)n=0; if(n>100)n=100;
+  return n/100;
+}
+function escapeSvg(s){
+  return s.replace(/%/g,'%25').replace(/#/g,'%23').replace(/</g,'%3C').replace(/>/g,'%3E').replace(/"/g,"'").replace(/\s+/g,' ');
+}
+function placeholder(color,path,dock){
+  var s='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"><rect width="400" height="300" fill="white"/>'+
+  '<path d="'+path+'" fill="none" stroke="'+color+'" stroke-width="5"/>'+
+  '<rect x="'+dock[0]+'" y="'+dock[1]+'" width="40" height="12" fill="'+color+'"/></svg>';
+  return 'data:image/svg+xml;utf8,'+escapeSvg(s);
+}
+// scale rule: metres per pixel from a bar; null if unusable
+function metresPerPx(barPx,barM){
+  var p=Number(barPx),m=Number(barM);
+  if(!isFinite(p)||!isFinite(m)||p<=0||m<=0)return null;
+  return m/p;
+}
+// real-unit offset of north bank; factory lets a broken copy skip the scale
+function makeOffset(useScale){
+  return function(a,b){
+    var sa=useScale?metresPerPx(a.barPx,a.barM):1;
+    var sb=useScale?metresPerPx(b.barPx,b.barM):1;
+    if(sa===null||sb===null)return null;
+    var ra=a.bank*sa, rb=b.bank*sb;
+    return {aM:ra,bM:rb,diff:rb-ra};
+  };
+}
+var bankOffset=makeOffset(true), brokenOffset=makeOffset(false);
+function verdict(d,tol){
+  if(d===null)return 'need valid scale bars';
+  if(Math.abs(d.diff)<=tol)return 'same real distance: the gap is just scale (bad copy)';
+  return d.diff>0?'newer bank is farther: the pond really grew':'newer bank is closer: the pond shrank';
+}
+var imgA=document.getElementById('mapA'),imgB=document.getElementById('mapB'),
+slider=document.getElementById('op'),outEl=document.getElementById('val');
+imgA.src=placeholder('#2a6fb0','M80 150 C80 70 180 50 250 80 C330 100 340 190 280 230 C210 270 90 240 80 150Z',[60,140]);
+imgB.src=placeholder('#d6472b','M90 150 C90 60 200 60 260 90 C340 120 330 200 270 240 C200 260 100 250 90 150Z',[290,170]);
+function apply(){
+  var o=opacityFromSlider(slider.value);
+  imgB.style.opacity=o;
+  outEl.textContent=Math.round(o*100)+'%';
+}
+slider.addEventListener('input',apply);
+[['b0',0],['b50',50],['b100',100]].forEach(function(p){
+  document.getElementById(p[0]).addEventListener('click',function(){slider.value=p[1];apply();});
+});
+function readBox(id){return document.getElementById(id).value;}
+function scaleUpdate(){
+  var d=bankOffset(
+    {barPx:readBox('aPx'),barM:readBox('aM'),bank:Number(readBox('aBank'))},
+    {barPx:readBox('bPx'),barM:readBox('bM'),bank:Number(readBox('bBank'))});
+  var r=document.getElementById('result');
+  if(d===null){r.textContent=verdict(null,0);return;}
+  r.textContent='older '+d.aM.toFixed(2)+' m, newer '+d.bM.toFixed(2)+' m, difference '+d.diff.toFixed(2)+' m. '+verdict(d,0.05);
+}
+['aPx','aM','aBank','bPx','bM','bBank'].forEach(function(id){
+  document.getElementById(id).addEventListener('input',scaleUpdate);
+});
+apply();scaleUpdate();
+(function test(){
+  var bad=[];
+  try{
+    var cases=[[0,0],[100,1],[50,.5],[-5,0],[150,1],['abc',.5],[1,.01],[99,.99]];
+    cases.forEach(function(c){if(opacityFromSlider(c[0])!==c[1])bad.push('slider '+c[0]);});
+    if(escapeSvg('<a fill="#f"/>')!=="%3Ca fill='%23f'/%3E")bad.push('escape');
+    if(imgA.src.indexOf('data:image/svg+xml')!==0||imgB.src.indexOf('data:image/svg+xml')!==0)bad.push('src');
+    slider.value=25;apply();
+    if(imgB.style.opacity!=='0.25')bad.push('dom');
+    slider.value=50;apply();
+    // scale tests
+    if(metresPerPx(100,10)!==0.1)bad.push('mpp');
+    if(metresPerPx(0,10)!==null||metresPerPx(100,0)!==null||metresPerPx('x',5)!==null)bad.push('mpp edge');
+    // same real size, different pixels: 200px at 0.1 = 20m; 100px at 0.2 = 20m
+    var A={barPx:100,barM:10,bank:200},B={barPx:50,barM:10,bank:100};
+    var same=bankOffset(A,B);
+    if(!same||Math.abs(same.diff)>1e-9)bad.push('same size');
+    var grew=bankOffset(A,{barPx:100,barM:10,bank:210});
+    if(!grew||Math.abs(grew.diff-1)>1e-9)bad.push('grew');
+    if(bankOffset(A,{barPx:0,barM:10,bank:1})!==null)bad.push('null');
+    if(verdict(grew,0.05).indexOf('grew')<0||verdict(same,0.05).indexOf('bad copy')<0)bad.push('verdict');
+    // tolerance tie: 0.05 passes as same, 0.06 does not
+    if(verdict({diff:0.05},0.05).indexOf('bad copy')<0||verdict({diff:0.06},0.05).indexOf('bad copy')>=0)bad.push('tie');
+    // broken copy ignoring scale must fail the same-size case
+    var br=brokenOffset(A,B);
+    if(Math.abs(br.diff)<1e-9)bad.push('broken copy not caught');
+    if(document.documentElement.scrollWidth>window.innerWidth)bad.push('overflow');
+  }catch(e){bad.push('error: '+e.message);}
+  var b=document.getElementById('banner');
+  b.className=bad.length?'fail':'pass';
+  b.textContent=bad.length?'FAIL: '+bad.join(', '):'self-test passed (slider, escaper, images, scale conversion, tolerance tie, broken copy rejected, no overflow)';
+})();
+</script>
+</body>
+</html>
