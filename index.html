@@ -28,7 +28,7 @@ button:active{background:#cdbd78}
 @media(min-width:480px){.grid{grid-template-columns:1fr 1fr}}
 .grid label{display:block;font-size:.85rem;min-width:0;overflow-wrap:anywhere}
 .grid input{width:100%;min-height:40px;font:inherit;padding:4px}
-#result{font-family:monospace;font-size:.9rem;margin-top:8px;overflow-wrap:anywhere}
+#result,#repeat{font-family:monospace;font-size:.9rem;margin-top:8px;overflow-wrap:anywhere}
 </style>
 </head>
 <body>
@@ -57,6 +57,7 @@ button:active{background:#cdbd78}
 <label>Newer north bank (px)<input id="bBank" type="number" min="0" step="any" value="210"></label>
 </div>
 <div id="result"></div>
+<div id="repeat"></div>
 </div>
 </div>
 <script>
@@ -75,13 +76,25 @@ function placeholder(color,path,dock){
   '<rect x="'+dock[0]+'" y="'+dock[1]+'" width="40" height="12" fill="'+color+'"/></svg>';
   return 'data:image/svg+xml;utf8,'+escapeSvg(s);
 }
-// scale rule: metres per pixel from a bar; null if unusable
 function metresPerPx(barPx,barM){
   var p=Number(barPx),m=Number(barM);
   if(!isFinite(p)||!isFinite(m)||p<=0||m<=0)return null;
   return m/p;
 }
-// real-unit offset of north bank; factory lets a broken copy skip the scale
+// broken twin: divides the wrong way round (pixels per metre)
+function brokenMetresPerPx(barPx,barM){
+  var p=Number(barPx),m=Number(barM);
+  if(!isFinite(p)||!isFinite(m)||p<=0||m<=0)return null;
+  return p/m;
+}
+// repeat check: convert twice, results must match, and bar px * scale must give back bar metres
+function repeatCheck(conv,barPx,barM){
+  var s1=conv(barPx,barM),s2=conv(barPx,barM);
+  if(s1===null||s2===null)return {ok:false,why:'unusable bar'};
+  if(s1!==s2)return {ok:false,why:'differs between runs'};
+  if(Math.abs(Number(barPx)*s1-Number(barM))>1e-9)return {ok:false,why:'does not convert back to bar length'};
+  return {ok:true,why:'same twice, round trip ok'};
+}
 function makeOffset(useScale){
   return function(a,b){
     var sa=useScale?metresPerPx(a.barPx,a.barM):1;
@@ -116,6 +129,9 @@ function scaleUpdate(){
     {barPx:readBox('aPx'),barM:readBox('aM'),bank:Number(readBox('aBank'))},
     {barPx:readBox('bPx'),barM:readBox('bM'),bank:Number(readBox('bBank'))});
   var r=document.getElementById('result');
+  var ra=repeatCheck(metresPerPx,readBox('aPx'),readBox('aM'));
+  var rb=repeatCheck(metresPerPx,readBox('bPx'),readBox('bM'));
+  document.getElementById('repeat').textContent='Bar conversion: older '+ra.why+'; newer '+rb.why+'.';
   if(d===null){r.textContent=verdict(null,0);return;}
   r.textContent='older '+d.aM.toFixed(2)+' m, newer '+d.bM.toFixed(2)+' m, difference '+d.diff.toFixed(2)+' m. '+verdict(d,0.05);
 }
@@ -133,10 +149,8 @@ apply();scaleUpdate();
     slider.value=25;apply();
     if(imgB.style.opacity!=='0.25')bad.push('dom');
     slider.value=50;apply();
-    // scale tests
     if(metresPerPx(100,10)!==0.1)bad.push('mpp');
     if(metresPerPx(0,10)!==null||metresPerPx(100,0)!==null||metresPerPx('x',5)!==null)bad.push('mpp edge');
-    // same real size, different pixels: 200px at 0.1 = 20m; 100px at 0.2 = 20m
     var A={barPx:100,barM:10,bank:200},B={barPx:50,barM:10,bank:100};
     var same=bankOffset(A,B);
     if(!same||Math.abs(same.diff)>1e-9)bad.push('same size');
@@ -144,16 +158,21 @@ apply();scaleUpdate();
     if(!grew||Math.abs(grew.diff-1)>1e-9)bad.push('grew');
     if(bankOffset(A,{barPx:0,barM:10,bank:1})!==null)bad.push('null');
     if(verdict(grew,0.05).indexOf('grew')<0||verdict(same,0.05).indexOf('bad copy')<0)bad.push('verdict');
-    // tolerance tie: 0.05 passes as same, 0.06 does not
     if(verdict({diff:0.05},0.05).indexOf('bad copy')<0||verdict({diff:0.06},0.05).indexOf('bad copy')>=0)bad.push('tie');
-    // broken copy ignoring scale must fail the same-size case
     var br=brokenOffset(A,B);
     if(Math.abs(br.diff)<1e-9)bad.push('broken copy not caught');
+    // repeat checks: real must pass every case, broken must fail at least one
+    var rc=[[100,10],[50,10],[37,12.5],[1,1000]];
+    rc.forEach(function(c){if(!repeatCheck(metresPerPx,c[0],c[1]).ok)bad.push('repeat '+c);});
+    if(repeatCheck(metresPerPx,0,10).ok||repeatCheck(metresPerPx,10,-1).ok)bad.push('repeat edge');
+    var brokenFails=0;
+    rc.forEach(function(c){if(!repeatCheck(brokenMetresPerPx,c[0],c[1]).ok)brokenFails++;});
+    if(brokenFails<1)bad.push('broken scale not rejected');
     if(document.documentElement.scrollWidth>window.innerWidth)bad.push('overflow');
   }catch(e){bad.push('error: '+e.message);}
   var b=document.getElementById('banner');
   b.className=bad.length?'fail':'pass';
-  b.textContent=bad.length?'FAIL: '+bad.join(', '):'self-test passed (slider, escaper, images, scale conversion, tolerance tie, broken copy rejected, no overflow)';
+  b.textContent=bad.length?'FAIL: '+bad.join(', '):'self-test passed (slider, escaper, images, scale conversion twice, round trip, tolerance tie, broken copies rejected, no overflow)';
 })();
 </script>
 </body>
