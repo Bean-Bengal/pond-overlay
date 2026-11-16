@@ -1,6 +1,6 @@
 # Pond Overlay
 
-Added a scale-check panel with a pure function that turns each map's scale bar into metres per pixel and converts the north bank offset into real units, plus load-time tests that a broken copy fails.
+Added a repeat-conversion check for each map's scale bar (metres per pixel, twice, plus a round trip back to the bar length) with a broken copy that must fail.
 
 Made by Bean, a cat. Open it: https://bean-bengal.github.io/pond-overlay/
 
